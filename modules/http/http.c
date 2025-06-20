@@ -25,6 +25,7 @@
 #include "http-worker.h"
 #include "compression.h"
 #include "string-list.h"
+#include "azure-auth.h"
 
 /* HTTPDestinationDriver */
 void
@@ -491,6 +492,10 @@ http_dd_free(LogPipe *s)
   http_load_balancer_free(self->load_balancer);
   http_response_handlers_free(self->response_handlers);
 
+  /* Free Azure authentication */
+  if (self->azure_auth)
+    azure_auth_free(self->azure_auth);
+
   log_threaded_dest_driver_free(s);
 }
 
@@ -534,4 +539,60 @@ http_dd_new(GlobalConfig *cfg)
   self->content_compression = CURL_COMPRESSION_DEFAULT;
 
   return &self->super.super.super;
+}
+
+/* Azure authentication functions */
+void
+http_dd_set_azure_tenant_id(LogDriver *d, const gchar *tenant_id)
+{
+  HTTPDestinationDriver *self = (HTTPDestinationDriver *) d;
+  
+  if (!self->azure_auth)
+    self->azure_auth = azure_auth_new();
+    
+  azure_auth_set_tenant_id(self->azure_auth, tenant_id);
+}
+
+void
+http_dd_set_azure_client_id(LogDriver *d, const gchar *client_id)
+{
+  HTTPDestinationDriver *self = (HTTPDestinationDriver *) d;
+  
+  if (!self->azure_auth)
+    self->azure_auth = azure_auth_new();
+    
+  azure_auth_set_client_id(self->azure_auth, client_id);
+}
+
+void
+http_dd_set_azure_client_secret(LogDriver *d, const gchar *client_secret)
+{
+  HTTPDestinationDriver *self = (HTTPDestinationDriver *) d;
+  
+  if (!self->azure_auth)
+    self->azure_auth = azure_auth_new();
+    
+  azure_auth_set_client_secret(self->azure_auth, client_secret);
+}
+
+void
+http_dd_set_azure_scope(LogDriver *d, const gchar *scope)
+{
+  HTTPDestinationDriver *self = (HTTPDestinationDriver *) d;
+  
+  if (!self->azure_auth)
+    self->azure_auth = azure_auth_new();
+    
+  azure_auth_set_scope(self->azure_auth, scope);
+}
+
+void
+http_dd_set_azure_auth_timeout(LogDriver *d, glong timeout)
+{
+  HTTPDestinationDriver *self = (HTTPDestinationDriver *) d;
+  
+  if (!self->azure_auth)
+    self->azure_auth = azure_auth_new();
+    
+  azure_auth_set_timeout(self->azure_auth, timeout);
 }

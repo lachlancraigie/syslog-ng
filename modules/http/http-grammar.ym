@@ -88,6 +88,12 @@ HttpResponseHandler last_response_handler;
 %token KW_DROP
 %token KW_DISCONNECT
 %token KW_FLUSH_ON_WORKER_KEY_CHANGE
+%token KW_AZURE_AUTH
+%token KW_TENANT_ID
+%token KW_CLIENT_ID
+%token KW_CLIENT_SECRET
+%token KW_SCOPE
+%token KW_AUTH_TIMEOUT
 
 
 %type   <ptr> driver
@@ -178,6 +184,20 @@ http_option
       }
     | { last_template_options = http_dd_get_template_options(last_driver); } template_option
     | KW_RESPONSE_ACTION '(' response_action_items ')'
+    | KW_AZURE_AUTH '(' azure_auth_options ')'
+    ;
+
+azure_auth_options
+    : azure_auth_option azure_auth_options
+    |
+    ;
+
+azure_auth_option
+    : KW_TENANT_ID '(' string ')'         { http_dd_set_azure_tenant_id(last_driver, $3); free($3); }
+    | KW_CLIENT_ID '(' string ')'         { http_dd_set_azure_client_id(last_driver, $3); free($3); }
+    | KW_CLIENT_SECRET '(' string ')'     { http_dd_set_azure_client_secret(last_driver, $3); free($3); }
+    | KW_SCOPE '(' string ')'             { http_dd_set_azure_scope(last_driver, $3); free($3); }
+    | KW_AUTH_TIMEOUT '(' nonnegative_integer ')' { http_dd_set_azure_auth_timeout(last_driver, $3); }
     ;
 
 http_tls_options
@@ -231,7 +251,7 @@ tls_cipher_suite
                     "Error setting cipher-suite(tls13()), specifying TLS 1.3 ciphers is not supported with this libcurl version");
         free($3);
       }
-    ;
+   ;
 
 /* INCLUDE_RULES */
 

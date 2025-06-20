@@ -69,6 +69,12 @@ static CfgLexerKeyword http_keywords[] =
   { "delimiter",        KW_DELIMITER },
   { "accept_encoding",  KW_ACCEPT_ENCODING },
   { "content_compression",    KW_CONTENT_COMPRESSION },
+  { "azure_auth",       KW_AZURE_AUTH },
+  { "tenant_id",        KW_TENANT_ID },
+  { "client_id",        KW_CLIENT_ID },
+  { "client_secret",    KW_CLIENT_SECRET },
+  { "scope",            KW_SCOPE },
+  { "auth_timeout",     KW_AUTH_TIMEOUT },
   { NULL }
 };
 

@@ -32,6 +32,7 @@
 #include "logthrdest/logthrdestdrv.h"
 #include "http-loadbalancer.h"
 #include "response-handler.h"
+#include "azure-auth.h"
 
 typedef struct
 {
@@ -67,6 +68,9 @@ typedef struct
   LogTemplate *body_template;
   LogTemplateOptions template_options;
   HttpResponseHandlers *response_handlers;
+  
+  /* Azure authentication */
+  AzureAuth *azure_auth;
 } HTTPDestinationDriver;
 
 gboolean http_dd_init(LogPipe *s);
@@ -100,5 +104,12 @@ void http_dd_insert_response_handler(LogDriver *d, HttpResponseHandler *response
 LogTemplateOptions *http_dd_get_template_options(LogDriver *d);
 void http_dd_set_accept_encoding(LogDriver *d, const gchar *encoding);
 gboolean http_dd_set_content_compression(LogDriver *d, const gchar *encoding);
+
+/* Azure authentication functions */
+void http_dd_set_azure_tenant_id(LogDriver *d, const gchar *tenant_id);
+void http_dd_set_azure_client_id(LogDriver *d, const gchar *client_id);
+void http_dd_set_azure_client_secret(LogDriver *d, const gchar *client_secret);
+void http_dd_set_azure_scope(LogDriver *d, const gchar *scope);
+void http_dd_set_azure_auth_timeout(LogDriver *d, glong timeout);
 
 #endif

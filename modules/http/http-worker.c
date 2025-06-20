@@ -386,6 +386,11 @@ static gboolean
 _try_format_request_headers(HTTPDestinationWorker *self, GError **error)
 {
   _add_common_headers(self);
+  
+  /* Add Azure authentication header if configured */
+  _add_azure_auth_header(self, error);
+  if (*error)
+    return FALSE;
 
   _collect_rest_headers(self, error);
 
@@ -526,6 +531,158 @@ default_map_http_status_to_worker_status(HTTPDestinationWorker *self, const gcha
     }
 
   return retval;
+}
+
+static void
+_reinit_request_headers(HTTPDestinationWorker *self)
+{
+  list_remove_all(self->request_headers);
+}
+
+static void
+_reinit_request_body(HTTPDestinationWorker *self)
+{
+  HTTPDestinationDriver *owner = (HTTPDestinationDriver *) self->super.owner;
+
+  g_string_truncate(self->request_body, 0);
+  if (self->request_body_compressed != NULL)
+    g_string_truncate(self->request_body_compressed, 0);
+
+  if (owner->body_prefix->len > 0)
+    g_string_append_len(self->request_body, owner->body_prefix->str, owner->body_prefix->len);
+
+}
+
+static void
+_reinit_response_headers(HTTPDestinationWorker *self)
+{
+  g_string_truncate(self->response_encoding, 0);
+}
+
+static void
+_finish_request_body(HTTPDestinationWorker *self)
+{
+  HTTPDestinationDriver *owner = (HTTPDestinationDriver *) self->super.owner;
+
+  if (owner->body_suffix->len > 0)
+    g_string_append_len(self->request_body, owner->body_suffix->str, owner->body_suffix->len);
+}
+
+static void
+_debug_response_info(HTTPDestinationWorker *self, const gchar *url, glong http_code)
+{
+  HTTPDestinationDriver *owner = (HTTPDestinationDriver *) self->super.owner;
+
+  gdouble total_time = 0;
+  glong redirect_count = 0;
+
+  curl_easy_getinfo(self->curl, CURLINFO_TOTAL_TIME, &total_time);
+  curl_easy_getinfo(self->curl, CURLINFO_REDIRECT_COUNT, &redirect_count);
+  msg_debug("http: HTTP response received",
+            evt_tag_str("url", url),
+            evt_tag_int("status_code", http_code),
+            evt_tag_int("body_size", self->request_body->len),
+            evt_tag_int("batch_size", self->super.batch_size),
+            evt_tag_int("redirected", redirect_count != 0),
+            evt_tag_printf("total_time", "%.3f", total_time),
+            evt_tag_int("worker_index", self->super.worker_index),
+            evt_tag_str("driver", owner->super.super.super.id),
+            log_pipe_location_tag(&owner->super.super.super.super));
+}
+
+static LogThreadedResult
+_custom_1XX(HTTPDestinationWorker *self, const gchar *url, glong http_code)
+{
+  HTTPDestinationDriver *owner = (HTTPDestinationDriver *) self->super.owner;
+  msg_error("http: Server returned with a 1XX (continuation) status code, which was not handled by curl. ",
+            evt_tag_str("url", url),
+            evt_tag_int("status_code", http_code),
+            evt_tag_str("driver", owner->super.super.super.id),
+            log_pipe_location_tag(&owner->super.super.super.super));
+
+  return LTR_NOT_CONNECTED;
+}
+
+static LogThreadedResult
+_custom_3XX(HTTPDestinationWorker *self, const gchar *url, glong http_code)
+{
+  HTTPDestinationDriver *owner = (HTTPDestinationDriver *) self->super.owner;
+  msg_notice("http: Server returned with a 3XX (redirect) status code. "
+             "Either accept-redirect() is set to no, or this status code is unknown.",
+             evt_tag_str("url", url),
+             evt_tag_int("status_code", http_code),
+             evt_tag_str("driver", owner->super.super.super.id),
+             log_pipe_location_tag(&owner->super.super.super.super));
+  if (http_code == 304)
+    return LTR_ERROR;
+
+  return LTR_NOT_CONNECTED;
+}
+
+static LogThreadedResult
+_custom_4XX(HTTPDestinationWorker *self, const gchar *url, glong http_code)
+{
+  HTTPDestinationDriver *owner = (HTTPDestinationDriver *) self->super.owner;
+  msg_notice("http: Server returned with a 4XX (client errors) status code, which means we are not "
+             "authorized or the URL is not found or the request is malformed.",
+             evt_tag_str("url", url),
+             evt_tag_int("status_code", http_code),
+             evt_tag_str("driver", owner->super.super.super.id),
+             log_pipe_location_tag(&owner->super.super.super.super));
+
+  static glong errors[] = {428, -1};
+  if (_find_http_code_in_list(http_code, errors))
+    return LTR_ERROR;
+
+  static glong drops[] = {410, 416, 422, 424, 425, 451, -1};
+  if (_find_http_code_in_list(http_code, drops))
+    return LTR_DROP;
+
+  return LTR_NOT_CONNECTED;
+}
+
+static LogThreadedResult
+_custom_5XX(HTTPDestinationWorker *self, const gchar *url, glong http_code)
+{
+  HTTPDestinationDriver *owner = (HTTPDestinationDriver *) self->super.owner;
+  msg_notice("http: Server returned with a 5XX (server errors) status code, which indicates server failure.",
+             evt_tag_str("url", url),
+             evt_tag_int("status_code", http_code),
+             evt_tag_str("driver", owner->super.super.super.id),
+             log_pipe_location_tag(&owner->super.super.super.super));
+  if (http_code == 508)
+    return LTR_DROP;
+
+  static glong errors[] = {504, -1};
+  if (_find_http_code_in_list(http_code, errors))
+    return LTR_ERROR;
+
+  return LTR_NOT_CONNECTED;
+}
+
+static LogThreadedResult
+_custom_map_http_status_to_worker_status(HTTPDestinationWorker *self, const gchar *url, glong http_code)
+{
+  switch (HTTP_CODE_BASE(http_code))
+    {
+    case 1:
+      return _custom_1XX(self, url, http_code);
+    case 3:
+      return _custom_3XX(self, url, http_code);
+    case 4:
+      return _custom_4XX(self, url, http_code);
+    case 5:
+      return _custom_5XX(self, url, http_code);
+    default:
+      msg_error("http: Unknown HTTP response code",
+                evt_tag_str("url", url),
+                evt_tag_int("status_code", http_code),
+                evt_tag_str("driver", owner->super.super.super.id),
+                log_pipe_location_tag(&owner->super.super.super.super));
+      break;
+    }
+
+  return LTR_ERROR;
 }
 
 static void
@@ -1035,4 +1192,28 @@ http_dw_new(LogThreadedDestDriver *o, gint worker_index)
 
   http_lb_client_init(&self->lbc, owner->load_balancer);
   return &self->super;
+}
+
+static void
+_add_azure_auth_header(HTTPDestinationWorker *self, GError **error)
+{
+  HTTPDestinationDriver *owner = (HTTPDestinationDriver *) self->super.owner;
+  
+  if (!owner->azure_auth || !azure_auth_is_configured(owner->azure_auth))
+    return;
+    
+  gchar *token = azure_auth_get_token(owner->azure_auth, error);
+  if (!token)
+    {
+      msg_error("http: Failed to get Azure authentication token", 
+                evt_tag_str("error", (*error)->message));
+      return;
+    }
+    
+  gchar *auth_header = g_strdup_printf("Authorization: Bearer %s", token);
+  list_append(self->request_headers, auth_header);
+  
+  msg_debug("http: Added Azure authentication header to request");
+  
+  g_free(token);
 }

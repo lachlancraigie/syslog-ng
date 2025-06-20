@@ -2,6 +2,9 @@ if (NOT DEFINED ENABLE_CURL OR ENABLE_CURL)
   find_package(Curl)
 endif()
 
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(JSONC REQUIRED json-c)
+
 module_switch(ENABLE_CURL "Enable http destination" Curl_FOUND)
 if (NOT ENABLE_CURL)
   return ()
@@ -9,6 +12,10 @@ endif ()
 
 if (NOT Curl_FOUND)
   message(FATAL_ERROR "HTTP module enabled, but libcurl not found")
+endif ()
+
+if (NOT JSONC_FOUND)
+  message(FATAL_ERROR "HTTP module enabled, but json-c not found")
 endif ()
 
 find_package(ZLIB)
@@ -35,10 +42,13 @@ set(HTTP_DESTINATION_SOURCES
     autodetect-ca-location.c
     compression.h
     compression.c
+    azure-auth.h
+    azure-auth.c
 )
 
 set(HTTP_MODULE_DEV_HEADERS
   http-signals.h
+  azure-auth.h
 )
 
 add_module(
@@ -46,8 +56,10 @@ add_module(
   GRAMMAR http-grammar
   INCLUDES ${Curl_INCLUDE_DIR}
            ${ZLIB_INCLUDE_DIRS}
+           ${JSONC_INCLUDE_DIRS}
   DEPENDS ${Curl_LIBRARIES}
           ${ZLIB_LIBRARIES}
+          ${JSONC_LIBRARIES}
   SOURCES ${HTTP_DESTINATION_SOURCES}
 )
 
